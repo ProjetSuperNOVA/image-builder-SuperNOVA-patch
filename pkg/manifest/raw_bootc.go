@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/osbuild/image-builder/internal/common"
@@ -373,22 +374,42 @@ func (p *RawBootcImage) serialize() (osbuild.Pipeline, error) {
 			postStages = append(postStages, ignitionStage)
 		}
 
-		// Apply grub2 console configuration (terminal_input, terminal_output,
-		// serial) via the grub2.d stage which writes a drop-in config file
-		// under boot/grub2/. Like ignition, this writes to /boot so we use
-		// bootupd mounts.
-		if grub2dCfg := osbuild.NewGrub2DConfigFromGrub2Config(p.OSCustomizations.Grub2Config); grub2dCfg != nil {
-			grub2dOpts := &osbuild.Grub2DStageOptions{
-				Config: grub2dCfg,
-				Path:   "tree:///boot/grub2/console.cfg",
-			}
-			grub2dStage := osbuild.NewGrub2DStage(grub2dOpts)
-			grub2dStage.Devices, grub2dStage.Mounts, err = osbuild.GenBootupdDevicesMounts(p.filename, p.PartitionTable, p.platform)
-			if err != nil {
-				return osbuild.Pipeline{}, fmt.Errorf("gen devices for grub2.d stage failed %w", err)
-			}
-			postStages = append(postStages, grub2dStage)
+		// Write the bootc GRUB drop-in under boot/grub2. The timeout is
+		// explicitly zero and hidden so GRUB cannot display or wait on its menu.
+		// Removing the console terminals is separate from hiding the menu.
+		grub2Cfg := &osbuild.GRUB2Config{}
+		if p.OSCustomizations.Grub2Config != nil {
+			*grub2Cfg = *p.OSCustomizations.Grub2Config
+			grub2Cfg.TerminalInput = slices.Clone(grub2Cfg.TerminalInput)
+			grub2Cfg.TerminalOutput = slices.Clone(grub2Cfg.TerminalOutput)
 		}
+		if err := osbuild.ValidateGRUB2TimeoutStyle(grub2Cfg.TimeoutStyle); err != nil {
+			return osbuild.Pipeline{}, err
+		}
+		grub2Cfg.Timeout = 0
+		grub2Cfg.TimeoutSet = true
+		grub2Cfg.TimeoutStyle = osbuild.GRUB2ConfigTimeoutStyleHidden
+		grub2Data, err := osbuild.RenderBootcGRUB2Config(grub2Cfg)
+		if err != nil {
+			return osbuild.Pipeline{}, err
+		}
+		grub2File, err := fsnode.NewFile("/boot/grub2/console.cfg", nil, nil, nil, []byte(grub2Data))
+		if err != nil {
+			return osbuild.Pipeline{}, fmt.Errorf("create GRUB2 drop-in: %w", err)
+		}
+		grub2Stages, err := p.genFileStagesAndRecordInlineData([]*fsnode.File{grub2File})
+		if err != nil {
+			return osbuild.Pipeline{}, err
+		}
+		grub2Devices, grub2Mounts, err := osbuild.GenBootupdDevicesMounts(p.filename, p.PartitionTable, p.platform)
+		if err != nil {
+			return osbuild.Pipeline{}, fmt.Errorf("gen devices for GRUB2 drop-in failed %w", err)
+		}
+		for _, stage := range grub2Stages {
+			stage.Devices = grub2Devices
+			stage.Mounts = grub2Mounts
+		}
+		postStages = append(postStages, grub2Stages...)
 
 		pipeline.AddStages(postStages...)
 

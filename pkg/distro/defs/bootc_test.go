@@ -921,7 +921,7 @@ func TestManifestSerialization(t *testing.T) {
 			expStages: map[string][]string{
 				"image": {
 					"org.osbuild.bootc.install-to-filesystem",
-					"org.osbuild.grub2.d",
+					"org.osbuild.copy",
 				},
 			},
 		},

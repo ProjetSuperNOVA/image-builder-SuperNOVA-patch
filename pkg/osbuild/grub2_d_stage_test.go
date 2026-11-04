@@ -43,6 +43,17 @@ func TestNewGrub2DConfigFromGrub2Config(t *testing.T) {
 			},
 			expected: nil,
 		},
+		"explicit-zero-timeout": {
+			input: &GRUB2Config{
+				Timeout:    0,
+				TimeoutSet: true,
+			},
+			expected: nil,
+		},
+		"omitted-timeout": {
+			input:    &GRUB2Config{},
+			expected: nil,
+		},
 		"serial-only": {
 			input: &GRUB2Config{
 				Serial: "serial --unit=0 --speed=115200",
@@ -90,6 +101,22 @@ func TestNewGrub2DConfigFromGrub2Config(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func TestValidateGRUB2TimeoutStyle(t *testing.T) {
+	assert.NoError(t, ValidateGRUB2TimeoutStyle(""))
+	assert.NoError(t, ValidateGRUB2TimeoutStyle(GRUB2ConfigTimeoutStyleHidden))
+	assert.Error(t, ValidateGRUB2TimeoutStyle("invalid"))
+}
+
+func TestRenderBootcGRUB2Config(t *testing.T) {
+	data, err := RenderBootcGRUB2Config(&GRUB2Config{
+		Serial:         "serial --unit=0 --speed=115200",
+		TerminalInput:  []string{"serial", "console"},
+		TerminalOutput: []string{"serial", "console"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "set pager=0\nset timeout=0\nset timeout_style=hidden\nterminal_input --remove console\nterminal_output --remove console gfxterm vga_text\nserial --unit=0 --speed=115200\nterminal_input serial\nterminal_output serial\n", data)
 }
 
 func TestGrub2DStageOptionsJSON(t *testing.T) {

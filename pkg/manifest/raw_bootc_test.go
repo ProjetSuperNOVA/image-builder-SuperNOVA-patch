@@ -389,7 +389,7 @@ func TestRawBootcImageSerializeCreateFilesDirs(t *testing.T) {
 			}
 
 			// check files
-			copyStage := findStage("org.osbuild.copy", pipeline.Stages)
+			copyStage := findCopyStageTo(pipeline.Stages, "tree:///path/to/file")
 			if len(tc.files) > 0 {
 				// ensure options got passed
 				require.NotNil(t, copyStage)
@@ -415,6 +415,21 @@ func TestRawBootcImageSerializeCreateFilesDirs(t *testing.T) {
 			// currently very hard to test :(
 		})
 	}
+}
+
+func findCopyStageTo(stages []*osbuild.Stage, path string) *osbuild.Stage {
+	for _, stage := range stages {
+		if stage.Type != "org.osbuild.copy" {
+			continue
+		}
+		opts := stage.Options.(*osbuild.CopyStageOptions)
+		for _, copyPath := range opts.Paths {
+			if copyPath.To == path {
+				return stage
+			}
+		}
+	}
+	return nil
 }
 
 func TestRawBootcPipelineFSTabStage(t *testing.T) {
@@ -453,14 +468,16 @@ func TestRawBootcImageSerializeGrub2DStage(t *testing.T) {
 		expectedPath string
 	}{
 		{
-			name:        "nil-config",
-			grub2Config: nil,
-			expectStage: false,
+			name:         "nil-config",
+			grub2Config:  nil,
+			expectStage:  true,
+			expectedPath: "tree:///boot/grub2/console.cfg",
 		},
 		{
-			name:        "empty-config",
-			grub2Config: &osbuild.GRUB2Config{},
-			expectStage: false,
+			name:         "empty-config",
+			grub2Config:  &osbuild.GRUB2Config{},
+			expectStage:  true,
+			expectedPath: "tree:///boot/grub2/console.cfg",
 		},
 		{
 			name: "only-unrelated-fields",
@@ -468,7 +485,8 @@ func TestRawBootcImageSerializeGrub2DStage(t *testing.T) {
 				Default: "saved",
 				Timeout: 5,
 			},
-			expectStage: false,
+			expectStage:  true,
+			expectedPath: "tree:///boot/grub2/console.cfg",
 		},
 		{
 			name: "serial-only",
@@ -496,12 +514,12 @@ func TestRawBootcImageSerializeGrub2DStage(t *testing.T) {
 			pipeline, err := rawBootcPipeline.Serialize()
 			assert.NoError(t, err)
 
-			grub2dStage := findStage("org.osbuild.grub2.d", pipeline.Stages)
+			grub2dStage := findCopyStageTo(pipeline.Stages, "tree:///boot/grub2/console.cfg")
 			if tc.expectStage {
 				require.NotNil(t, grub2dStage)
-				opts := grub2dStage.Options.(*osbuild.Grub2DStageOptions)
-				assert.Equal(t, tc.expectedPath, opts.Path)
-				assert.NotNil(t, opts.Config)
+				opts := grub2dStage.Options.(*osbuild.CopyStageOptions)
+				require.Len(t, opts.Paths, 1)
+				assert.Equal(t, tc.expectedPath, opts.Paths[0].To)
 				// verify bootupd mounts are set up
 				assert.NotEmpty(t, grub2dStage.Devices)
 				assert.NotEmpty(t, grub2dStage.Mounts)
@@ -510,6 +528,16 @@ func TestRawBootcImageSerializeGrub2DStage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRawBootcImageSerializeGrub2DStageRejectsInvalidTimeoutStyle(t *testing.T) {
+	rawBootcPipeline := makeFakeRawBootcPipeline()
+	rawBootcPipeline.OSCustomizations.Grub2Config = &osbuild.GRUB2Config{
+		TimeoutStyle: "invalid",
+	}
+
+	_, err := rawBootcPipeline.Serialize()
+	assert.EqualError(t, err, `invalid GRUB2 timeout style "invalid"`)
 }
 
 // findPreInstallStages returns stages of the given type that appear before
@@ -763,6 +791,7 @@ func TestRawBootcImageSerializeSubscriptionEnvFile(t *testing.T) {
 		"tree:///etc/osbuild-subscription-register.env", // from the subscription options
 		"tree:///etc/test/one",                          // directly from the OS customizations
 		"tree:///etc/test/two",
+		"tree:///boot/grub2/console.cfg",
 	}
 
 	pipeline, err := rawBootcPipeline.Serialize()
@@ -777,6 +806,7 @@ func TestRawBootcImageSerializeSubscriptionEnvFile(t *testing.T) {
 		"ORG_ID=000\nACTIVATION_KEY=111",
 		"test 1",
 		"test 2",
+		"set pager=0\nset timeout=0\nset timeout_style=hidden\nterminal_input --remove console\nterminal_output --remove console gfxterm vga_text\n",
 	}
 
 	fileContents := manifest.GetInline(rawBootcPipeline)

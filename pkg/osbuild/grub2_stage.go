@@ -52,6 +52,7 @@ type GRUB2Config struct {
 	TerminalInput   []string                `json:"terminal_input,omitempty" yaml:"terminal_input,omitempty"`
 	TerminalOutput  []string                `json:"terminal_output,omitempty" yaml:"terminal_output,omitempty"`
 	Timeout         int                     `json:"timeout,omitempty"`
+	TimeoutSet      bool                    `json:"-" yaml:"-"`
 	TimeoutStyle    GRUB2ConfigTimeoutStyle `json:"timeout_style,omitempty" yaml:"timeout_style,omitempty"`
 	Serial          string                  `json:"serial,omitempty"`
 }
